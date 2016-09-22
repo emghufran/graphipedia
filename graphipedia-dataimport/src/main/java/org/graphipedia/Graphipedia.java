@@ -119,7 +119,7 @@ public class Graphipedia {
 		self.rootDirectory();
 		// Loads the resources, namely the root categories of the disambiguation pages and infobox templates across all 
 		// Wikipedia language editions.
-		self.loadResources();
+		self.loadResources(); // not sure if i need this?
 		// Loads the checkpoint
 		self.loadCheckpoint();
 		
@@ -185,6 +185,7 @@ public class Graphipedia {
 	 * @throws IOException when something goes wrong while reading the resource.
 	 */
 	private void loadResource(InputStream file, Map<String, String> destination) throws IOException {
+		System.out.println(file.toString());
 		BufferedReader bd = new BufferedReader(new InputStreamReader(file));
 		String line;
 		while( (line = bd.readLine()) != null ) { 
@@ -247,13 +248,13 @@ public class Graphipedia {
 	 */
 	private void importEditions(Set<String> languageEditions) throws Exception {
 		long startTime = System.currentTimeMillis();
-		Neo4jConnector neo4jConnector = new Neo4jConnector(settings, logger);
-		BatchInserter inserter = neo4jConnector.connectToNeo4jInserter();
+		//Neo4jConnector neo4jConnector = new Neo4jConnector(settings, logger);
+		//BatchInserter inserter = neo4jConnector.connectToNeo4jInserter();
 		List<WikipediaEdition> wikipediaEditions = wikipediaEditions(languageEditions);
 		int nbEditions = wikipediaEditions.size();
 		int current = 0;
 		ExtractData extractData = null;
-		ImportGraph graphImporter = null;
+		//ImportGraph graphImporter = null;
 		Map<String, Namespaces> namespaces = new HashMap<String, Namespaces>();
 		for ( WikipediaEdition edition : wikipediaEditions ) 
 			settings.addLanguage(edition.languageCode());
@@ -272,18 +273,21 @@ public class Graphipedia {
 			extractData.start();
 			extractData.join();
 			namespaces.put(languageCode, extractData.getNamespaces());
-			if ( graphImporter != null )
-				graphImporter.join(); // wait for the previous import to finish, if it's still running.
-			graphImporter = new ImportGraph(inserter, settings, languageCode, extractData.geotags(), 
-					suffix, editionStartTime);
-			graphImporter.start();
+			//if ( graphImporter != null )
+			//	graphImporter.join(); // wait for the previous import to finish, if it's still running.
+			//graphImporter = new ImportGraph(inserter, settings, languageCode, extractData.geotags(), 
+			//		suffix, editionStartTime);
+			//graphImporter.start();
 			
 			
 		}
+		/*
 		if (graphImporter != null)
 			graphImporter.join();
+			
 		neo4jConnector.disconnectFromNeo4jInserter(inserter);
-		importCrossLinks(neo4jConnector, namespaces);
+		*/
+		//importCrossLinks(neo4jConnector, namespaces);
 		long elapsed = System.currentTimeMillis() - startTime;
 		logger.info("Deleting the files downloaded from Wikimedia and the checkpoint file...");
 		for ( WikipediaEdition edition : wikipediaEditions ) 

@@ -63,6 +63,14 @@ public class InfoboxTemplatesExtractor extends Thread {
 	 */
 	private CheckPoint checkpoint;
 
+	public InfoboxTemplatesExtractor(GraphipediaSettings settings, String language, 
+			String rootCategory, String loggerMessageSuffix) {
+		this.infoboxTemplates = new InfoboxTemplates(settings.wikipediaEditionDirectory(language));
+		this.language = language;
+		this.rootCategory = rootCategory;
+		this.logger = LoggerFactory.createLogger("Infobox Extractor (" + loggerMessageSuffix + ")");
+		this.checkpoint = null;
+	}
 	/**
 	 * Constructor.
 	 * @param settings The settings of the import.

@@ -156,15 +156,15 @@ public class ExtractData extends Thread {
 		InfoboxTemplatesExtractor itExtractor = 
 				new InfoboxTemplatesExtractor(settings, language, itRootCategory, checkpoint, loggerMessageSuffix);
 		itExtractor.start();
-		ExtractGeoTags geotagsExtractor = new ExtractGeoTags(settings, language, loggerMessageSuffix);
-		geotagsExtractor.start();
+		//ExtractGeoTags geotagsExtractor = new ExtractGeoTags(settings, language, loggerMessageSuffix);
+		//geotagsExtractor.start();
 		try {
 			dpExtractor.join();
 			nsExtractor.join();
 			this.ns = nsExtractor.namespaces();
 			itExtractor.join();
-			geotagsExtractor.join();
-			this.geotags = geotagsExtractor.getGeoTags();
+			//geotagsExtractor.join();
+			//this.geotags = geotagsExtractor.getGeoTags();
 		} catch (InterruptedException e) {
 			logger.severe("Problems with the threads.");
 			e.printStackTrace();

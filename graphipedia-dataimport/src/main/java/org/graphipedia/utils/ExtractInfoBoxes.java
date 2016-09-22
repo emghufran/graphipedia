@@ -21,36 +21,55 @@
 //
 package org.graphipedia.utils;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Logger;
 
 import javax.xml.stream.XMLStreamException;
 
+import org.graphipedia.GraphipediaSettings;
+import org.graphipedia.dataextract.InfoboxTemplatesExtractor;
 import org.graphipedia.dataextract.NamespaceExtractor;
 import org.graphipedia.progress.LoggerFactory;
 import org.graphipedia.progress.ProgressCounter;
 import org.graphipedia.progress.ReadableTime;
+import org.graphipedia.wikipedia.DisambiguationPages;
+import org.graphipedia.wikipedia.Infobox;
+import org.graphipedia.wikipedia.InfoboxTemplates;
 import org.graphipedia.wikipedia.Introduction;
 import org.graphipedia.wikipedia.Namespace;
 import org.graphipedia.wikipedia.Namespaces;
+import org.graphipedia.wikipedia.parser.InfoboxParser;
 import org.graphipedia.wikipedia.parser.IntroductionParser;
 import org.graphipedia.wikipedia.parser.SimpleStaxParser;
 import org.graphipedia.wikipedia.parser.WikiTextCleaner;
+import org.graphipedia.wikipedia.parser.WikiTextParser;
 import org.graphipedia.wikipedia.parser.XmlFileTags;
 
 /**
- * This auxiliary program is used to extract the introduction of the 
+ * This auxiliary program is used to extract the infoboxes of the 
  * Wikipedia pages in a specific language edition.
  * The introductions are written to a CSV file stored in the working directory, where each line contains the following information:
- * id_page, title_page, introduction. The three fields are separated by a tab character.
+ * id_page, title_page, infobox_content. The three fields are separated by a tab character.
  */
-public class ExtractIntroduction {
+public class ExtractInfoBoxes {
 
+	public static final File ROOT_DIR = new File("graphipedia-data");
+		
+	/**
+	 * The directory where the files of the Neo4j database are written.
+	 */
+	 public static final File NEO4J_DIR = new File(ROOT_DIR, "neo4j-db");
+		
 	/**
 	 * Entry point of the program
 	 * @param args Command-line arguments. (the XML file of the Wikipedia version to parse).
@@ -59,9 +78,9 @@ public class ExtractIntroduction {
 	 */
 	public static void main(String[] args) throws Exception {
 
-		Logger logger = LoggerFactory.createLogger("ExtractIntroduction");
+		Logger logger = LoggerFactory.createLogger("ExtractInfoBoxes");
 		if ( args.length != 2 ) {
-			logger.severe("USAGE: java -jar ExtractIntroduction.jar xml-wikipedia-file lang-code");
+			logger.severe("USAGE: java -jar ExtractInfoBoxes.jar xml-wikipedia-file lang-code");
 			System.exit(-1);
 		}
 
@@ -74,7 +93,7 @@ public class ExtractIntroduction {
 		logger.info("Start extracting data...");
 		long startTime = System.currentTimeMillis();
 		Namespaces ns = null;
-		try {
+			try {
 			logger.info("Reading the namespaces...");
 			ns = extractNamespaces(inputFile);
 		} catch (Exception e) {
@@ -82,10 +101,38 @@ public class ExtractIntroduction {
 			e.printStackTrace();
 			System.exit(-1);
 		}
+		
+		HashMap<String, String> itRootCategories = new HashMap<String, String>();
+		InputStream ibTemplatesFile = new FileInputStream("it-root-categories.csv");
+		BufferedReader bd = new BufferedReader(new InputStreamReader(ibTemplatesFile));
+		String line;
+		while( (line = bd.readLine()) != null ) { 
+			String[] values = line.split("\t");
+			itRootCategories.put(values[0], values[1]);
+		}
+		bd.close();
+		
+		GraphipediaSettings settings = new GraphipediaSettings(ExtractInfoBoxes.ROOT_DIR, ExtractInfoBoxes.NEO4J_DIR);
+		String itRootCategory = itRootCategories.get(language);
+		
+		InfoboxTemplatesExtractor itExtractor = 
+				new InfoboxTemplatesExtractor(settings, language, itRootCategory, "");
+		itExtractor.start();
+		
 		try {
-			logger.info("Extracting the introductions...");
-			BufferedWriter bw = new BufferedWriter(new FileWriter("introduction_" + language + ".csv"));
-			XmlFileParser extractor = new XmlFileParser(bw, ns, logger);
+			itExtractor.join();
+		} catch (InterruptedException e) {
+			logger.severe("Problems with the threads.");
+			e.printStackTrace();
+			System.exit(-1);
+		}
+		
+		InfoboxTemplates ibTemplates = itExtractor.infoboxTemplates();
+		
+		try {
+			logger.info("Extracting the infoboxes...");
+			BufferedWriter bw = new BufferedWriter(new FileWriter("infoboxes_" + language + ".csv"));
+			XmlInfoBoxFileParser extractor = new XmlInfoBoxFileParser(bw, ns, ibTemplates, logger);
 			extractor.parse(inputFile.getAbsolutePath());
 			bw.close();
 		}
@@ -116,7 +163,7 @@ public class ExtractIntroduction {
  * Parser used to get the introduction of each page. 
  *
  */
-class XmlFileParser extends SimpleStaxParser {
+class XmlInfoBoxFileParser extends SimpleStaxParser {
 
 	/** 
 	 * A counter used to track the progress of this extractor.
@@ -147,17 +194,25 @@ class XmlFileParser extends SimpleStaxParser {
 	 * The list of the namespaces in the Wikipedia edition being currently processed.
 	 */
 	private Namespaces ns;
+	
+	private InfoboxTemplates it;
 
 	/**
 	 * The parser of the introduction of a Wikipedia page.
 	 */
 	private IntroductionParser introParser;
 
+	/**
+	 * The parser of the infobox of a Wikipedia page.
+	 */
+	private InfoboxParser infoboxParser;
 
 	/**
 	 * The object used to clean the wiki code of a Wikipedia page.
 	 */
 	private WikiTextCleaner  cleaner;
+	
+	private WikiTextParser wikiTextParser;
 
 	/**
 	 * Creates the parser.
@@ -165,16 +220,21 @@ class XmlFileParser extends SimpleStaxParser {
 	 * @param ns The namespaces of the Wikipedia edition being parsed.
 	 * @param logger The logger of the program.
 	 */
-	public XmlFileParser(BufferedWriter bw, Namespaces ns, Logger logger) {
+	public XmlInfoBoxFileParser(BufferedWriter bw, Namespaces ns, InfoboxTemplates it, Logger logger) {
 		super(Arrays.asList(XmlFileTags.page.toString(), XmlFileTags.title.toString(), 
 				XmlFileTags.text.toString(), XmlFileTags.id.toString()), 
 				Arrays.asList(""));
 		this.bw = bw;
 		this.ns = ns;
+		this.it = it;
 		this.title = null;
 		this.text = null;
 		this.id = null;
 		this.introParser = new IntroductionParser();
+		this.infoboxParser = new InfoboxParser(it);
+		DisambiguationPages dp = null;
+		this.wikiTextParser = new WikiTextParser(this.ns, this.it, dp);
+		
 		this.pageCounter = new ProgressCounter(logger);
 		try {
 			this.cleaner = new WikiTextCleaner(ns);
@@ -190,7 +250,13 @@ class XmlFileParser extends SimpleStaxParser {
 		if (XmlFileTags.page.toString().equals(element)) {
 			Namespace pageNamespace = ns.wikipediaPageNamespace(title); 
 			if (  pageNamespace.id() == Namespace.MAIN ) {
-				writePage(title, id, text); /// regular Wikipedia page.
+				
+				Infobox infobox = (new InfoboxParser(this.it)).parse(value);
+				if(infobox != null) {
+					writePage(title, id, infobox.text());
+				}
+				
+				//writePage(title, id, text); /// regular Wikipedia page.
 			}
 			title = null;
 			text = null;
@@ -219,8 +285,6 @@ class XmlFileParser extends SimpleStaxParser {
 	 * @param text The text of the page.
 	 */
 	private void writePage(String title, String id, String text) {
-		//Text = mediawiki
-		
 		Introduction intro = introParser.parse(text);
 		if ( intro != null ) {
 			String introText = intro.text();
@@ -242,5 +306,4 @@ class XmlFileParser extends SimpleStaxParser {
 		}
 		pageCounter.increment("Parsing pages");
 	}
-
 }
